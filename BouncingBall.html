@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Bouncing Ball!</title>
+    <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0px;
+      border: 0;
+      overflow: hidden; /*  Disable scrollbars */
+      display: block;  /* No floating content on sides */
+    }
+    </style>
+</head>
+
+<body>
+    <canvas id='myCanvas' style='position:absolute; left:0px; top:0px;'>
+    </canvas>
+
+    <script>
+    (function() {
+        var
+        // Obtain a reference to the canvas element using its id.
+        htmlCanvas = document.getElementById('myCanvas'),
+        // Obtain a graphics context on the canvas element for drawing.
+        context = htmlCanvas.getContext('2d');
+		
+		cursorX = 0;
+		cursorY = 0;
+		previousPerformance = performance.now();
+		deltaTime = 0;
+		var ball = null;
+		
+		var BallShape = class {
+			constructor(posX,posY,radius,color){
+				this.x = posX;
+				this.y = posY;
+				this.radius = radius;
+				this.color = color != null? Object.create(color) : {r:0,g:0,b:0,a:255};
+			}
+			draw()
+			{
+				context.fillStyle = this.getColorString();
+				context.beginPath();
+				context.arc(this.x,this.y,this.radius,0,2*Math.PI);
+				context.fill();
+				context.closePath();
+			}
+			getColorString()
+			{
+				return "rgb(" + this.color.r + "," + this.color.g + "," + this.color.b + "," + this.color.a + ")";
+			}
+		}
+		var BouncingBall = class {
+			constructor(posX,posY,radius,color) {
+				this.shape = new BallShape(posX,posY,radius,color);
+				
+				this.rb = 
+				{
+					isKinematic: false,
+					velocity: {x:0,y:0},
+					gravity: 10,
+					bounciness: 0.8
+				};
+				
+				this.tail = [];
+				this.tailLifespan = 0.2;
+				this.tailSpawntime = 0.01;
+				
+				this.timeSinceLastTailSpawn = 0;
+			}
+			
+			resetVelocity()
+			{
+				this.rb.velocity = {x:0,y:0};
+			};
+			
+			_spawnTailShape()
+			{
+				var shape = new BallShape(this.shape.x,this.shape.y,this.shape.radius,this.shape.color);
+				shape.maxlife = this.tailLifespan;
+				shape.life = shape.maxlife
+				shape.originalAlpha = shape.color.a;
+				shape.fadeOut = function(self)
+				{
+					self.color.a -= self.originalAlpha / self.maxlife * deltaTime;
+					self.life -= deltaTime;
+				}
+				this.tail.push(shape);
+			}
+			
+			draw()
+			{
+				this.shape.draw();
+				var tailLength = this.tail.length;
+				var i = 0;
+				while(i<tailLength)
+				{
+					if(this.tail[i].life <= 0)
+					{
+						this.tail.splice(i,1);
+						tailLength--;
+					}
+					else
+					{
+						this.tail[i].fadeOut(this.tail[i]);
+						this.tail[i].draw();
+						i++
+					}
+				}
+			}
+			
+			update()
+			{
+				if(!this.rb.isKinematic)
+				{
+					this.rb.velocity.y += this.rb.gravity * deltaTime;
+					this.shape.x += this.rb.velocity.x;
+					this.shape.y += this.rb.velocity.y;
+					
+					
+					var canvasMinX = this.shape.radius;
+					var canvasMinY = this.shape.radius;
+					var canvasMaxX = htmlCanvas.width - this.shape.radius;
+					var canvasMaxY = htmlCanvas.height - this.shape.radius;
+					
+					if(this.shape.x<canvasMinX)
+					{
+						this.shape.x = canvasMinX;
+						this.rb.velocity.x *= -1 * this.rb.bounciness;
+					}
+					if(this.shape.x>canvasMaxX)
+					{
+						this.shape.x = canvasMaxX;
+						this.rb.velocity.x *= -1 * this.rb.bounciness;
+					}
+					if(this.shape.y<canvasMinY)
+					{
+						this.shape.y = canvasMinY;
+						this.rb.velocity.y *= -1 * this.rb.bounciness;
+					}
+					if(this.shape.y>canvasMaxY)
+					{
+						this.shape.y = canvasMaxY;
+						this.rb.velocity.y *= -1 * this.rb.bounciness;
+					}
+				}
+				
+				
+				if(this.tailSpawntime > 0)
+				{
+					this.timeSinceLastTailSpawn -= deltaTime;
+					if(this.timeSinceLastTailSpawn<=0)
+					{
+						this.timeSinceLastTailSpawn = this.tailSpawntime;
+						this._spawnTailShape();
+					}
+				}
+				
+				if(this.isHeld)
+				{
+					this.rb.velocity.x = (cursorX - this.shape.x) * 0.6;
+					this.rb.velocity.y = (cursorY - this.shape.y) * 0.6;
+					this.shape.x = cursorX;
+					this.shape.y = cursorY;
+				}
+			}
+		};
+		
+		
+
+       // Start listening to resize events and draw canvas.
+       initialize();
+
+       function initialize() {
+           // Register an event listener to call the resizeCanvas() function 
+           // each time the window is resized.
+           window.addEventListener('resize', resizeCanvas, false);
+		   window.addEventListener('focus', onfocus);
+		   window.addEventListener('mousedown', onmousedown);
+		   window.addEventListener('mouseup', onmouseup);
+		   window.addEventListener('mousemove', onmousemove);
+		   window.addEventListener('touchstart', ontouchstart);
+		   window.addEventListener('touchend', ontouchend);
+		   window.addEventListener('touchcancel', ontouchcancel);
+		   window.addEventListener('touchmove', ontouchmove);
+		   resizeCanvas();
+		   
+		   
+		   var ballRadius = Math.min(htmlCanvas.width , htmlCanvas.height) / 36
+		   
+		   ball = new BouncingBall(150,150,ballRadius,{r:20,g:35,b:255,a:1});
+		   
+           window.requestAnimationFrame(update);
+        }
+
+        // Display custom canvas. In this case it's a blue, 5 pixel 
+        // border that resizes along with the browser window.
+        function redraw() {
+			context.clearRect(0, 0, htmlCanvas.width, htmlCanvas.height);
+			if(ball != null)
+			{
+				ball.draw();
+			}
+        }
+
+		function resizeCanvas()
+		{
+			htmlCanvas.width = window.innerWidth;
+            htmlCanvas.height = window.innerHeight;
+			redraw();
+		}
+        function update() {
+			pNow = performance.now();
+			deltaTime = (pNow - previousPerformance)/1000;
+			previousPerformance = pNow;
+			//Add periodic methods here
+			
+			if(ball != null)
+			{
+				ball.update();
+			}
+			
+			//==========================================================
+			
+			redraw();
+            window.requestAnimationFrame(update);
+        }
+		function onfocus()
+		{
+			previousPerformance = performance.now();
+		}
+		
+		function CheckForBallDrag(bDrag)
+		{
+			if(bDrag)
+			{
+				if(ball != null && !ball.isHeld)
+				{
+					path = new Path2D();
+					path.arc(ball.shape.x,ball.shape.y,ball.shape.radius,0,2*Math.PI);
+					if(context.isPointInPath(path,cursorX,cursorY))
+					{
+						ball.isHeld = true;
+						ball.rb.isKinematic = true;
+						ball.resetVelocity();
+					}
+				}
+			}
+			else
+			{
+				if(ball != null && ball.isHeld)
+				{
+					ball.isHeld = false;
+					ball.rb.isKinematic = false;
+					//The ball will be launched based on its velocity that is stored during update while isHeld is true.
+				}
+			}
+		}
+		
+		function onmousedown(e)
+		{
+			cursorX = e.pageX;
+			cursorY = e.pageY;
+			
+			CheckForBallDrag(true);
+		}
+		function onmouseup(e)
+		{
+			cursorX = e.pageX;
+			cursorY = e.pageY;
+			
+			CheckForBallDrag(false);
+		}
+		function onmousemove(e)
+		{
+			cursorX = e.pageX;
+			cursorY = e.pageY;
+		}
+		
+		function ontouchstart(e)
+		{
+			cursorX = e.changedTouches[0].pageX;
+			cursorY = e.changedTouches[0].pageY;
+			
+			CheckForBallDrag(true);
+		}
+		function ontouchend(e)
+		{
+			cursorX = e.changedTouches[0].pageX;
+			cursorY = e.changedTouches[0].pageY;
+			
+			CheckForBallDrag(false);
+		}
+		function ontouchcancel(e)
+		{
+			cursorX = e.changedTouches[0].pageX;
+			cursorY = e.changedTouches[0].pageY;
+			
+			CheckForBallDrag(false);
+		}
+		function ontouchmove(e)
+		{
+			cursorX = e.changedTouches[0].pageX;
+			cursorY = e.changedTouches[0].pageY;
+		}
+    })();
+
+    </script>
+</body> 
+</html>
