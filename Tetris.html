@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Tetris!</title>
+    <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0px;
+      border: 0;
+      overflow: hidden; /*  Disable scrollbars */
+      display: block;  /* No floating content on sides */
+    }
+    </style>
+</head>
+
+<body>
+    <canvas id='myCanvas' style='position:relative; left:0px; top:0px; border:1px solid #000000;'>
+    </canvas>
+
+    <script>
+    (function() {
+        var
+        // Obtain a reference to the canvas element using its id.
+        htmlCanvas = document.getElementById('myCanvas'),
+        // Obtain a graphics context on the canvas element for drawing.
+        context = htmlCanvas.getContext('2d');
+		
+		
+		//DEBUGS
+		var DEBUG_DRAW_SHAPE_PIVOTS = false;
+		//=========================
+		
+		cursorX = 0;
+		cursorY = 0;
+		previousPerformance = performance.now();
+		deltaTime = 0;
+		
+		function SetCursorPos(x,y)
+		{
+			
+			cursorX = x - WORLD_OFFSET_X;
+			cursorY = y - WORLD_OFFSET_Y;
+			
+		}
+		
+		
+		var TETRIS_BOARD_CELL_SIZE_RATIO = 0.05;
+		var TETRIS_BOARD_CELL_SIZE = Math.min(window.innerWidth,window.innerHeight) * TETRIS_BOARD_CELL_SIZE_RATIO;
+		var TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL = 10
+		var TETRIS_BOARD_BLOCK_COUNT_VERTICAL = 18;
+		
+		
+		var TETRIS_BOARD_WIDTH = TETRIS_BOARD_CELL_SIZE * TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL;
+		var TETRIS_BOARD_HEIGHT = TETRIS_BOARD_CELL_SIZE * TETRIS_BOARD_BLOCK_COUNT_VERTICAL;
+		var WORLD_OFFSET_X = ((window.innerWidth - TETRIS_BOARD_WIDTH)/2); //LEFT-MOST COORDINATE
+		var WORLD_OFFSET_Y = ((window.innerHeight - TETRIS_BOARD_HEIGHT)/2); //TOP-MOST COORDINATE
+		
+		var TETRIS_BOARD_MATRIX = [];
+		var TETRIS_BOARD_STACK = [];
+		
+		var TETRIS_SETTINGS_FALL_TIME = 0.75;
+		
+		var TETRIS_BOARD_GAME_OVER = false;
+		InitTetrisBoardMatrix();
+		
+		UpdateHTMLCanvasParams();
+		
+		
+		var templateShapes = []; // an array containing shapes' matrices + their colors.
+		var fallingShape = null;
+		var previouslyModifiedBoard;
+		
+		var RectShape = class {
+			constructor(posX,posY,width,height,color,strokeColor){
+				this.x = posX;
+				this.y = posY;
+				this.width = width;
+				this.height = height;
+				this.color = color != null? Object.create(color) : {r:0,g:0,b:0,a:1};
+				this.strokeColor = strokeColor != null? Object.create(strokeColor) : null;
+			}
+			draw(x,y)
+			{
+				x = x || 0;
+				y = y || 0;
+				var worldX = x + this.x;
+				var worldY = y + this.y;
+				
+				var pivotX = worldX - this.width*0.5;
+				var pivotY = worldY - this.height*0.5;
+				context.beginPath();
+				
+				context.fillStyle = this.getColorString();
+				context.fillRect(pivotX ,pivotY,this.width,this.height);
+				
+				
+				if(this.strokeColor != null)
+				{
+					context.strokeStyle = this.getStrokeColorString();
+					context.strokeRect(pivotX ,pivotY,this.width,this.height);
+				}
+				
+				if(DEBUG_DRAW_SHAPE_PIVOTS)
+				{
+					context.fillStyle = "red";
+					context.arc(worldX,worldY,5,0,2*Math.PI);
+					context.fill();
+				}
+				context.closePath();
+			}
+			getColorString()
+			{
+				return "rgb(" + this.color.r + "," + this.color.g + "," + this.color.b + "," + this.color.a + ")";
+			}
+			getStrokeColorString()
+			{
+				return "rgb(" + this.strokeColor.r + "," + this.strokeColor.g + "," + this.strokeColor.b + "," + this.strokeColor.a + ")";
+			}
+		}
+		
+		
+		var GridShape = class {
+			constructor(x,y, binaryGrid, shapeTemplate)
+			{
+				this.x = x;
+				this.y = y;
+				this.binaryGrid = binaryGrid || [[]];
+				this.shapeTemplate = shapeTemplate;
+				this.shapes = [];
+				
+				if(this.shapeTemplate)
+				{
+					for(var row = 0;row < this.binaryGrid.length;row++)
+					{
+						for(var col = 0;col < this.binaryGrid[row].length;col++)
+						{
+							if(this.binaryGrid[row][col] != 0)
+							{
+								var x = col * TETRIS_BOARD_CELL_SIZE;
+								var y = row * TETRIS_BOARD_CELL_SIZE;
+								var shape = new RectShape(x,y,this.shapeTemplate.width,this.shapeTemplate.height,this.shapeTemplate.color,this.shapeTemplate.strokeColor);
+								shape.grid = {};
+								shape.grid.row = row;
+								shape.grid.col = col;
+								this.shapes.push(shape);
+							}
+						}
+					}
+				}
+			}
+			
+			draw()
+			{
+				for(var i = 0;i < this.shapes.length;i++)
+				{
+					this.shapes[i].x = this.x + this.shapes[i].grid.col * TETRIS_BOARD_CELL_SIZE;
+					this.shapes[i].y = this.y + this.shapes[i].grid.row * TETRIS_BOARD_CELL_SIZE;
+					this.shapes[i].draw();
+				}
+			}
+			
+			rotate(bClockWise)
+			{
+				if(this.binaryGrid.length > 0)
+				{
+					var r = this.binaryGrid.length;
+					var c = this.binaryGrid[0].length;
+					var rotatedGrid = [];
+					for(var i = 0; i<c;i++)
+					{
+						rotatedGrid.push(Array(r).fill(0));
+					}
+					for(var i = 0; i<r;i++)
+					{
+						for(var j = 0; j<this.binaryGrid[i].length;j++)
+						{
+							if(bClockWise)
+								rotatedGrid[j][r-i-1] = this.binaryGrid[i][j];
+							else
+								rotatedGrid[this.binaryGrid[i].length-j-1][i] = this.binaryGrid[i][j];
+						}
+					}
+					for(var i = 0; i<this.shapes.length;i++)
+					{
+						var row = this.shapes[i].grid.row;
+						var col = this.shapes[i].grid.col;
+						if(bClockWise)
+						{
+							this.shapes[i].grid.row = col;
+							this.shapes[i].grid.col = c - row - 1;
+						}
+						else
+						{
+							this.shapes[i].grid.row = r - col - 1;
+							this.shapes[i].grid.col = row;
+						}
+					}
+					
+					//console.log(this.binaryGrid);
+					//console.log(rotatedGrid);
+					
+					this.binaryGrid = rotatedGrid;
+				}
+			}
+			
+			
+		}
+		
+		var TetrisShape = class {
+			constructor(gridX, gridY, gridShape)
+			{
+				this.gridX = gridX;
+				this.gridY = gridY;
+				this.shape = gridShape;
+			}
+			
+			draw()
+			{
+				if(this.shape)
+				{
+					var size = TETRIS_BOARD_CELL_SIZE;
+					var hSize = size/2;
+					var firstPos_X = hSize;
+					var firstPos_Y = hSize;
+				   
+					this.shape.x = firstPos_X + this.gridX * size;
+					this.shape.y = firstPos_Y + this.gridY * size;
+					this.shape.draw();
+				}
+			}
+			rotate(bClockWise)
+			{
+				this.shape.rotate(bClockWise);
+				var resultingMat = this.translate(0,0);
+				if(resultingMat == null)
+					this.shape.rotate(!bClockWise);
+				return resultingMat;
+			}
+			
+			rotateNonBlocking(bClockWise)
+			{
+				this.shape.rotate(bClockWise);
+			}
+			
+			translate(dx,dy) //returns null if couldnt translate, otherwise it returns the modified tetris board matrix
+			{
+				var x = this.gridX + dx;
+				var y = this.gridY + dy;
+				var paddingSize = 4;
+				
+				//sanity checks
+				if(x >= TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL || x + this.shape.binaryGrid[0].length-1 <  0)
+				{
+					return null;
+				}
+				if(y >= TETRIS_BOARD_BLOCK_COUNT_VERTICAL || y + this.shape.binaryGrid.length-1 <  0)
+				{
+					return null;
+				}
+				//===================================================================================================
+				
+				
+				var mat = CopyMatrix(TETRIS_BOARD_MATRIX);
+				//console.log(mat);
+				
+				
+				for(var r = 0;r<this.shape.binaryGrid.length;r++)
+				{
+					for(var c = 0;c<this.shape.binaryGrid[r].length;c++)
+					{
+						var originalCell = mat[paddingSize + y + r][paddingSize + x + c];
+						var cellSum = originalCell + this.shape.binaryGrid[r][c];
+						if((originalCell - cellSum != 0) && cellSum > 1)
+						{
+							return null;
+						}
+						
+						mat[paddingSize + y + r][paddingSize + x + c] = cellSum;
+					}
+				}
+				
+				this.gridX = x;
+				this.gridY = y;
+				return mat;
+			}
+		}
+		
+		
+		function InitTetrisBoardMatrix()
+		{
+			for(var i = 0;i<TETRIS_BOARD_BLOCK_COUNT_VERTICAL;i++)
+			{
+				var arr = Array(TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL).fill(0);
+				arr.splice(0,0,10,10,10,10);
+				arr.push(10);
+				arr.push(10);
+				arr.push(10);
+				arr.push(10);
+				TETRIS_BOARD_MATRIX.push(arr);
+				TETRIS_BOARD_STACK.push(Array(TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL).fill(null));
+			}
+			for(var i = 0;i<4;i++)
+			{
+				TETRIS_BOARD_MATRIX.splice(0,0,Array(TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL + 8).fill(10));
+				TETRIS_BOARD_MATRIX.push(Array(TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL + 8).fill(10));
+			}
+			//console.log(TETRIS_BOARD_MATRIX);
+			previouslyModifiedBoard = TETRIS_BOARD_MATRIX;
+		}
+		
+		function DrawTetrisStack()
+		{
+			var size = TETRIS_BOARD_CELL_SIZE;
+			var hSize = size/2;
+			var firstPos_X = hSize;
+			var firstPos_Y = hSize;
+			
+			for(var i = 0;i<TETRIS_BOARD_STACK.length;i++)
+			{
+				for(var j = 0;j<TETRIS_BOARD_STACK[i].length;j++)
+				{
+					if(TETRIS_BOARD_STACK[i][j] != null)
+					{
+						TETRIS_BOARD_STACK[i][j].x = firstPos_X + size * j;
+						TETRIS_BOARD_STACK[i][j].y = firstPos_Y + size * i;
+						TETRIS_BOARD_STACK[i][j].draw();
+					}
+				}
+			}
+		}
+		
+		function UpdateTetrisStackFromShape(whichTetrisShape)
+		{
+			for(var i = 0;i<whichTetrisShape.shape.binaryGrid.length;i++)
+			{
+				for(var j = 0;j<whichTetrisShape.shape.binaryGrid[i].length;j++)
+				{
+					if(whichTetrisShape.shape.binaryGrid[i][j] != 0)
+					{
+						TETRIS_BOARD_STACK[whichTetrisShape.gridY + i][whichTetrisShape.gridX + j] = whichTetrisShape.shape.shapeTemplate;
+					}
+				}
+			}
+			OnTetrisStackUpdated();
+		}
+		
+		
+		function OnTetrisStackUpdated()
+		{
+			var paddingSize = 4;
+			var i = TETRIS_BOARD_BLOCK_COUNT_VERTICAL-1;
+			while(i>=0)
+			{
+				var andOp = 1;
+				for(var j = 0;j<TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL;j++)
+				{
+					andOp = andOp && TETRIS_BOARD_MATRIX[paddingSize + i][paddingSize + j]
+				}
+				if(andOp != 0)
+				{
+					//eliminate row
+					TETRIS_BOARD_MATRIX.splice(paddingSize + i,1);
+					TETRIS_BOARD_STACK.splice(i,1);
+					//add new empty row at the beginning
+					var arr = Array(TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL).fill(0);
+					arr.splice(0,0,10,10,10,10);
+					arr.push(10);
+					arr.push(10);
+					arr.push(10);
+					arr.push(10);
+					TETRIS_BOARD_MATRIX.splice(paddingSize,0,arr);
+					TETRIS_BOARD_STACK.splice(0,0,Array(TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL).fill(null));
+				}
+				else
+					i--;
+			}
+		}
+		
+		function CopyMatrix(whichMat)
+		{
+			var copy = [];
+			for(var i = 0;i<whichMat.length;i++)
+			{
+				copy.push(Array(whichMat[i].length).fill(0));
+				for(var j = 0;j<whichMat[i].length;j++)
+				{
+					copy[i][j] = whichMat[i][j];
+				}
+			}
+			return copy;
+		}
+		
+		function GetRandomIndex(arrayLength)
+		{
+			return Math.floor(Math.random() * Math.floor(arrayLength));
+		}
+
+		// Start listening to resize events and draw canvas.
+		initialize();
+		
+		function initialize() {
+           // Register an event listener to call the resizeCanvas() function 
+           // each time the window is resized.
+           window.addEventListener('resize', resizeCanvas, false);
+		   window.addEventListener('focus', onfocus);
+		   window.addEventListener('mousedown', onmousedown);
+		   window.addEventListener('mouseup', onmouseup);
+		   window.addEventListener('mousemove', onmousemove);
+		   window.addEventListener('touchstart', ontouchstart);
+		   window.addEventListener('touchend', ontouchend);
+		   window.addEventListener('touchcancel', ontouchcancel);
+		   window.addEventListener('touchmove', ontouchmove);
+		   window.addEventListener("keydown", onkeydown);
+		   resizeCanvas();
+		   
+		   //Z
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[1,1,0],
+				[0,1,1],
+				[0,0,0]
+				],
+				color : {r:20,g:200,b:30,a:1}
+			});
+			//S
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[0,1,1],
+				[1,1,0],
+				[0,0,0]
+				],
+				color : {r:20,g:40,b:255,a:1}
+			});
+			
+		   //O
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[1,1],
+				[1,1],
+				],
+				color : {r:255,g:255,b:10,a:1}
+			});
+			
+			//I
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[0,0,0,0],
+				[1,1,1,1],
+				[0,0,0,0],
+				[0,0,0,0]
+				],
+				color : {r:15,g:200,b:200,a:1}
+			});
+			
+			//T
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[1,1,1],
+				[0,1,0],
+				[0,0,0]
+				],
+				color : {r:230,g:15,b:215,a:1}
+			});
+			
+			//L
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[1,0,0],
+				[1,0,0],
+				[1,1,0]
+				],
+				color : {r:230,g:125,b:5,a:1}
+			});
+			//L-flipped
+		   templateShapes.push(
+		   {
+			   gridMatrix:
+			   [
+				[0,0,1],
+				[0,0,1],
+				[0,1,1]
+				],
+				color : {r:230,g:15,b:15,a:1}
+			});
+			
+		   
+		   
+		   InitNewFallingShape();
+		   
+		   
+		   
+           window.requestAnimationFrame(update);
+        }
+		
+		function InitNewFallingShape()
+		{
+			var size = TETRIS_BOARD_CELL_SIZE;
+			var hSize = size/2;
+			var firstPos_X = hSize;
+			var firstPos_Y = hSize;
+			
+			var strokeColor = {r:0,g:0,b:0,a:1};
+			var randomIndex = GetRandomIndex(templateShapes.length);
+			
+			var templateShape = templateShapes[randomIndex];
+			fallingShape = new TetrisShape(4,0,new GridShape(firstPos_X,firstPos_Y, templateShape.gridMatrix,new RectShape(0,0,size,size,templateShape.color,strokeColor)));
+			fallingShape.timeToTranslateDown = TETRIS_SETTINGS_FALL_TIME;
+			
+			var initRotations = GetRandomIndex(4);
+			for(var i = 0;i<initRotations;i++)
+			{
+				fallingShape.rotateNonBlocking(true);
+			}
+			
+			var modifiedBoard = fallingShape.translate(0,0);
+			if(modifiedBoard)
+			{
+				previouslyModifiedBoard = modifiedBoard;
+			}
+			else
+			{
+				TETRIS_BOARD_GAME_OVER = true; //case when you have overflowing tetris stack
+			}
+		}
+		
+		function DoArrow_Left()
+		{
+			
+			modifiedBoard = fallingShape.translate(-1,0);
+			if(modifiedBoard != null)
+			{
+				previouslyModifiedBoard = modifiedBoard;;
+			}
+		}
+		function DoArrow_Right()
+		{
+			
+			modifiedBoard = fallingShape.translate(1,0);
+			if(modifiedBoard != null)
+			{
+				previouslyModifiedBoard = modifiedBoard;;
+			}
+		}
+		function DoArrow_Down()
+		{
+			
+			modifiedBoard = fallingShape.translate(0,1);
+			if(modifiedBoard == null)
+			{
+				if(previouslyModifiedBoard)
+				{
+					TETRIS_BOARD_MATRIX = previouslyModifiedBoard;
+					UpdateTetrisStackFromShape(fallingShape);
+				}
+				
+				InitNewFallingShape();
+			}
+			else
+			{
+				previouslyModifiedBoard = modifiedBoard;;
+			}
+		}
+		
+		function UpdateHTMLCanvasParams()
+		{
+			htmlCanvas.width = TETRIS_BOARD_WIDTH;
+            htmlCanvas.height = TETRIS_BOARD_HEIGHT;
+			htmlCanvas.style.left = "" + WORLD_OFFSET_X + "px"
+			htmlCanvas.style.top = "" + WORLD_OFFSET_Y + "px"
+			
+			
+		}
+		
+
+        // Display custom canvas. In this case it's a blue, 5 pixel 
+        // border that resizes along with the browser window.
+        function redraw() {
+			context.clearRect(0, 0, htmlCanvas.width, htmlCanvas.height);
+			if(fallingShape != null)
+			{
+				fallingShape.draw();
+			}
+			DrawTetrisStack();
+        }
+
+		function resizeCanvas()
+		{
+			TETRIS_BOARD_CELL_SIZE = Math.min(window.innerWidth,window.innerHeight) * TETRIS_BOARD_CELL_SIZE_RATIO;
+			TETRIS_BOARD_WIDTH = TETRIS_BOARD_CELL_SIZE * TETRIS_BOARD_BLOCK_COUNT_HORIZONTAL;
+			TETRIS_BOARD_HEIGHT = TETRIS_BOARD_CELL_SIZE * TETRIS_BOARD_BLOCK_COUNT_VERTICAL;
+			
+			WORLD_OFFSET_X = ((window.innerWidth - TETRIS_BOARD_WIDTH)/2); //LEFT-MOST COORDINATE
+			WORLD_OFFSET_Y = ((window.innerHeight - TETRIS_BOARD_HEIGHT)/2); //TOP-MOST COORDINATE
+			
+			
+			UpdateHTMLCanvasParams();
+			
+			
+			redraw();
+		}
+        function update() {
+			pNow = performance.now();
+			deltaTime = (pNow - previousPerformance)/1000;
+			previousPerformance = pNow;
+			//Add periodic methods here
+			
+			if(TETRIS_BOARD_GAME_OVER)
+				return;
+			
+			if(fallingShape != null)
+			{
+				fallingShape.timeToTranslateDown -= deltaTime;
+				if(fallingShape.timeToTranslateDown<= 0)
+				{
+					fallingShape.timeToTranslateDown = TETRIS_SETTINGS_FALL_TIME;
+					var modifiedBoard = fallingShape.translate(0,1);
+					if(modifiedBoard == null)
+					{
+						if(previouslyModifiedBoard)
+						{
+							TETRIS_BOARD_MATRIX = previouslyModifiedBoard;
+							UpdateTetrisStackFromShape(fallingShape);
+						}
+						
+						InitNewFallingShape();
+					}
+					else
+					{
+						previouslyModifiedBoard = modifiedBoard;;
+					}
+				}
+				
+			}
+			
+			
+			//==========================================================
+			
+			redraw();
+            window.requestAnimationFrame(update);
+        }
+		function onfocus()
+		{
+			previousPerformance = performance.now();
+		}
+		
+		
+		function onmousedown(e)
+		{
+			SetCursorPos(e.pageX,e.pageY);
+			
+			
+		}
+		function onmouseup(e)
+		{
+			SetCursorPos(e.pageX,e.pageY);
+			
+		}
+		function onmousemove(e)
+		{
+			SetCursorPos(e.pageX,e.pageY);
+		}
+		
+		function ontouchstart(e)
+		{
+			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
+			
+		}
+		function ontouchend(e)
+		{
+			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
+			
+		}
+		function ontouchcancel(e)
+		{
+			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
+			
+		}
+		function ontouchmove(e)
+		{
+			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
+		}
+		function onkeydown(e)
+		{
+			if(fallingShape == null)
+				return;
+			
+			var modifiedBoard = null;
+			if(e.key == "ArrowRight")
+			{
+				DoArrow_Right();
+				
+			}
+			if(e.key == "ArrowLeft")
+			{
+				DoArrow_Left();
+			}
+			if(e.key == "ArrowUp")
+			{
+				modifiedBoard = fallingShape.rotate(true);
+				if(modifiedBoard != null)
+				{
+					previouslyModifiedBoard = modifiedBoard;;
+				}
+			}
+			if(e.key == "ArrowDown")
+			{
+				DoArrow_Down();
+			}
+		}
+    })();
+
+    </script>
+</body> 
+</html>
