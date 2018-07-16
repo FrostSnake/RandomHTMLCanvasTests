@@ -16,10 +16,16 @@
 </head>
 
 <body>
-    <canvas id='myCanvas' style='position:relative; left:0px; top:0px; border:1px solid #000000;'>
-    </canvas>
-	<canvas id='previewCanvas' style='position:absolute; left:0px; top:0px; border:1px solid #000000;'>
-    </canvas>
+	<div style = "position:relative; top:10%; transform:translate(0%,-10%);">
+		<div style="position:relative; width:60%; float:right;">
+			<canvas id='myCanvas' style='position:relative; border:1px solid #000000;'>
+			</canvas>
+		</div>
+		<div style="width:40%;">
+			<canvas id='previewCanvas' style='position:relative; left:50%; top:10%; transform:translate(-50%,10%); border:1px solid #000000;'>
+			</canvas>
+		</div>
+	</div>
 
     <script>
     (function() {
@@ -80,6 +86,49 @@
 		var fallingShape = null;
 		var previewShape = null;
 		var previouslyModifiedBoard;
+		
+		var mouseSwipes = {xDiff:0,yDiff:0,startX:0,startY:0,isLeft:false,isRight:false,isUp:false,isDown:false};
+		mouseSwipes.Init = function(startX,startY)
+		{
+			this.xDiff = 0;
+			this.yDiff = 0;
+			this.startX = startX;
+			this.startY = startY;
+			this.isLeft = false;
+			this.isRight = false;
+			this.isUp = false;
+			this.isDown = false;
+		};
+		mouseSwipes.Update = function(coordX,coordY)
+		{
+			this.xDiff = coordX - this.startX;
+			this.yDiff = coordY - this.startY;
+			this.isLeft = false;
+			this.isRight = false;
+			this.isUp = false;
+			this.isDown = false;
+			
+			if( Math.abs( this.xDiff ) > Math.abs( this.yDiff )) //horizontal swipe
+			{
+				if ( this.xDiff <= 0 ) 
+				{
+					this.isLeft = true;
+				} else 
+				{
+					this.isRight = true;
+				}
+			}
+			else	//vertical swipe
+			{
+				if ( this.yDiff <= 0 ) 
+				{
+					this.isUp = true;
+				} else 
+				{
+					this.isDown = true;
+				}
+			}
+		};
 		
 		
 		var RectShape = class {
@@ -637,13 +686,13 @@
 		{
 			htmlCanvas.width = TETRIS_BOARD_WIDTH;
             htmlCanvas.height = TETRIS_BOARD_HEIGHT;
-			htmlCanvas.style.left = "" + WORLD_OFFSET_X + "px"
-			htmlCanvas.style.top = "" + WORLD_OFFSET_Y + "px"
+			//htmlCanvas.style.left = "" + WORLD_OFFSET_X + "px"
+			//htmlCanvas.style.top = "" + WORLD_OFFSET_Y + "px"
 			
 			previewCanvas.width = TETRIS_PREVIEW_CANVAS_WIDTH;
 			previewCanvas.height = TETRIS_PREVIEW_CANVAS_WIDTH;
-			previewCanvas.style.left = "" + (TETRIS_PREVIEW_CANVAS_WORLD_OFFSET_X) + "px";
-			previewCanvas.style.top = "" + TETRIS_PREVIEW_CANVAS_WORLD_OFFSET_Y + "px";
+			//previewCanvas.style.left = "" + (TETRIS_PREVIEW_CANVAS_WORLD_OFFSET_X) + "px";
+			//previewCanvas.style.top = "" + TETRIS_PREVIEW_CANVAS_WORLD_OFFSET_Y + "px";
 			
 		}
 		
@@ -738,6 +787,7 @@
 		{
 			SetCursorPos(e.pageX,e.pageY);
 			
+			
 		}
 		function onmousemove(e)
 		{
@@ -747,16 +797,73 @@
 		function ontouchstart(e)
 		{
 			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
+			mouseSwipes.Init(e.pageX,e.pageY);
 			
 		}
 		function ontouchend(e)
 		{
 			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
 			
+			mouseSwipes.Update(e.pageX,e.pageY);
+			
+			if(fallingShape == null)
+				return;
+			
+			var modifiedBoard = null;
+			if(mouseSwipes.isRight)
+			{
+				DoArrow_Right();
+				
+			}
+			if(mouseSwipes.isLeft)
+			{
+				DoArrow_Left();
+			}
+			if(mouseSwipes.isUp)
+			{
+				modifiedBoard = fallingShape.rotate(true);
+				if(modifiedBoard != null)
+				{
+					previouslyModifiedBoard = modifiedBoard;;
+				}
+			}
+			if(mouseSwipes.isDown)
+			{
+				DoArrow_Down();
+			}
+			
 		}
 		function ontouchcancel(e)
 		{
 			SetCursorPos(e.changedTouches[0].pageX,e.changedTouches[0].pageY);
+			
+			mouseSwipes.Update(e.pageX,e.pageY);
+			
+			if(fallingShape == null)
+				return;
+			
+			var modifiedBoard = null;
+			if(mouseSwipes.isRight)
+			{
+				DoArrow_Right();
+				
+			}
+			if(mouseSwipes.isLeft)
+			{
+				DoArrow_Left();
+			}
+			if(mouseSwipes.isUp)
+			{
+				modifiedBoard = fallingShape.rotate(true);
+				if(modifiedBoard != null)
+				{
+					previouslyModifiedBoard = modifiedBoard;;
+				}
+			}
+			if(mouseSwipes.isDown)
+			{
+				DoArrow_Down();
+			}
 			
 		}
 		function ontouchmove(e)
